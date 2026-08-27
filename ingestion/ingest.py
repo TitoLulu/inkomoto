@@ -1,0 +1,179 @@
+import os
+import time
+import logging
+import requests
+import psycopg2
+from psycopg2.extras import execute_values
+from datetime import datetime, timezone
+from prometheus_client import CollectorRegistry, Gauge, Counter, push_to_gateway
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger(__name__)
+
+# World Bank Projects API — public, no auth required
+WB_PROJECTS_URL = "https://search.worldbank.org/api/v2/projects"
+BATCH_SIZE = 500
+MAX_BATCHES = 20
+HEADERS = {"User-Agent": "wb-analytics-pipeline/1.0 (data engineering assessment)"}
+
+
+def get_conn():
+    return psycopg2.connect(
+        host=os.environ["POSTGRES_HOST"],
+        user=os.environ["POSTGRES_USER"],
+        password=os.environ["POSTGRES_PASSWORD"],
+        dbname=os.environ["POSTGRES_DB"],
+    )
+
+
+def fetch_projects(offset: int = 0) -> list[dict]:
+    params = {"format": "json", "rows": BATCH_SIZE, "os": offset}
+    resp = requests.get(WB_PROJECTS_URL, params=params, headers=HEADERS, timeout=30)
+    resp.raise_for_status()
+    if not resp.content or not resp.text.strip():
+        return []
+    data = resp.json()
+    # API returns projects as a dict keyed by project ID, not a list
+    return list(data.get("projects", {}).values())
+
+
+def to_amount(val) -> float | None:
+    if val is None or val == "":
+        return None
+    try:
+        return float(str(val).replace(",", ""))
+    except (ValueError, TypeError):
+        return None
+
+
+def to_date(val):
+    if not val:
+        return None
+    val = str(val).strip()
+    for fmt in (
+        "%Y-%m-%dT%H:%M:%SZ",
+        "%m/%d/%Y %I:%M:%S %p",
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%m-%d",
+    ):
+        try:
+            return datetime.strptime(val, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def parse_project(raw: dict) -> dict | None:
+    project_id = raw.get("id")
+    if not project_id:
+        return None
+
+    countries = raw.get("countryname", [])
+    codes = raw.get("countrycode", [])
+    sources = raw.get("source", [])
+
+    return {
+        "project_id":            project_id,
+        "project_name":          raw.get("project_name"),
+        "country":               (countries[0] if isinstance(countries, list) and countries
+                                  else raw.get("countryshortname")),
+        "country_code":          (codes[0] if isinstance(codes, list) and codes else None),
+        "region":                raw.get("regionname"),
+        "status":                raw.get("projectstatusdisplay") or raw.get("status"),
+        "lending_instrument":    raw.get("lendinginstr"),
+        "total_commitment_usd":  to_amount(raw.get("curr_total_commitment")),
+        "ibrd_commitment_usd":   to_amount(raw.get("ibrdcommamt")),
+        "ida_commitment_usd":    to_amount(raw.get("idacommamt")),
+        "total_project_cost_usd": to_amount(raw.get("lendprojectcost")),
+        "board_approval_date":   to_date(raw.get("boardapprovaldate")),
+        "closing_date":          to_date(raw.get("closingdate")),
+        "approval_fy":           raw.get("approvalfy"),
+        "source":                (sources[0] if isinstance(sources, list) and sources else None),
+        "updated_at":            datetime.now(timezone.utc),
+    }
+
+
+def upsert_projects(conn, projects: list[dict]) -> int:
+    if not projects:
+        return 0
+    columns = [
+        "project_id", "project_name", "country", "country_code", "region",
+        "status", "lending_instrument", "total_commitment_usd", "ibrd_commitment_usd",
+        "ida_commitment_usd", "total_project_cost_usd", "board_approval_date",
+        "closing_date", "approval_fy", "source", "updated_at",
+    ]
+    rows = [tuple(p[c] for c in columns) for p in projects]
+    sql = f"""
+        INSERT INTO loans ({', '.join(columns)})
+        VALUES %s
+        ON CONFLICT (project_id) DO UPDATE SET
+            status                  = EXCLUDED.status,
+            total_commitment_usd    = EXCLUDED.total_commitment_usd,
+            ibrd_commitment_usd     = EXCLUDED.ibrd_commitment_usd,
+            ida_commitment_usd      = EXCLUDED.ida_commitment_usd,
+            closing_date            = EXCLUDED.closing_date,
+            updated_at              = EXCLUDED.updated_at
+    """
+    with conn.cursor() as cur:
+        execute_values(cur, sql, rows)
+    conn.commit()
+    return len(rows)
+
+
+def push_metrics(registry: CollectorRegistry) -> None:
+    url = os.environ.get("PUSHGATEWAY_URL")
+    if not url:
+        log.warning("PUSHGATEWAY_URL not set — skipping metrics push")
+        return
+    push_to_gateway(url, job="wb_ingestion", registry=registry)
+    log.info("Metrics pushed to %s", url)
+
+
+def run() -> int:
+    registry = CollectorRegistry()
+    loans_gauge   = Gauge("wb_loans_ingested_total",      "Projects ingested in this run", registry=registry)
+    duration_gauge = Gauge("wb_ingestion_duration_seconds", "Ingestion run duration",       registry=registry)
+    error_counter  = Counter("wb_ingestion_errors_total",  "Ingestion errors",              registry=registry)
+
+    start = time.time()
+    conn  = get_conn()
+    total = 0
+
+    for batch in range(MAX_BATCHES):
+        offset = batch * BATCH_SIZE
+        try:
+            raw_records = fetch_projects(offset=offset)
+            if not raw_records:
+                log.info("No more records at offset %d — done.", offset)
+                break
+
+            parsed = [p for r in raw_records if (p := parse_project(r)) is not None]
+            upsert_projects(conn, parsed)
+            total += len(parsed)
+            log.info("Batch %d: %d projects (total=%d)", batch + 1, len(parsed), total)
+
+            if len(raw_records) < BATCH_SIZE:
+                break
+
+            time.sleep(0.3)
+
+        except Exception as exc:
+            log.error("Batch %d failed: %s", batch + 1, exc)
+            error_counter.inc()
+
+    conn.close()
+    duration = time.time() - start
+    loans_gauge.set(total)
+    duration_gauge.set(duration)
+
+    try:
+        push_metrics(registry)
+    except Exception as exc:
+        log.warning("Metrics push failed: %s", exc)
+
+    log.info("Ingestion complete. projects=%d duration=%.1fs", total, duration)
+    return total
+
+
+if __name__ == "__main__":
+    run()

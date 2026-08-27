@@ -1,0 +1,14 @@
+kiva_analytics:
+  target: dev
+  outputs:
+    dev:
+      type: clickhouse
+      schema: staging
+      host: "{{ env_var('CLICKHOUSE_HOST', 'localhost') }}"
+      port: 8123
+      user: "{{ env_var('CLICKHOUSE_USER', 'default') }}"
+      password: "{{ env_var('CLICKHOUSE_PASSWORD', '') }}"
+      secure: false
+      verify: false
+      connect_timeout: 10
+      send_receive_timeout: 300

@@ -1,0 +1,128 @@
+name: CI / CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # ── LINT & UNIT TESTS ────────────────────────────────────────────────────────
+  lint-and-unit-test:
+    name: Lint & Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install ruff pytest pytest-mock psycopg2-binary requests prometheus-client
+
+      - name: Lint (ruff)
+        run: ruff check ingestion/ orchestration/dags/ tests/
+
+      - name: Unit tests
+        run: pytest tests/unit/ -v --tb=short
+
+  # ── VALIDATE COMPOSE & DBT ───────────────────────────────────────────────────
+  validate-config:
+    name: Validate Configs
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate docker-compose syntax
+        run: docker compose config --quiet
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dbt-clickhouse
+        run: pip install dbt-clickhouse==1.8.0 dbt-core
+
+      - name: dbt deps
+        run: cd transform && dbt deps
+
+      - name: dbt parse (validate SQL)
+        run: cd transform && dbt parse --profiles-dir .
+        env:
+          CLICKHOUSE_HOST: localhost
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: ""
+
+      - name: dbt compile
+        run: cd transform && dbt compile --profiles-dir .
+        env:
+          CLICKHOUSE_HOST: localhost
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: ""
+
+  # ── INTEGRATION TESTS (main branch only) ─────────────────────────────────────
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [lint-and-unit-test, validate-config]
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare .env
+        run: |
+          cp .env.example .env
+          pip install cryptography
+          FERNET=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+          SECRET=$(python -c "import secrets; print(secrets.token_hex(32))")
+          echo "AIRFLOW_FERNET_KEY=$FERNET" >> .env
+          echo "AIRFLOW_SECRET_KEY=$SECRET" >> .env
+
+      - name: Start postgres and clickhouse
+        run: docker compose up -d postgres clickhouse
+        env:
+          COMPOSE_FILE: docker-compose.yml
+
+      - name: Wait for postgres
+        run: |
+          for i in $(seq 1 30); do
+            docker compose exec -T postgres pg_isready -U dataeng -d analytics_db && break
+            sleep 2
+          done
+
+      - name: Wait for clickhouse
+        run: |
+          for i in $(seq 1 30); do
+            docker compose exec -T clickhouse clickhouse-client \
+              --user default --password clickhouse_pass --query "SELECT 1" && break
+            sleep 2
+          done
+
+      - name: Run ingestion
+        run: docker compose run --rm ingestion
+
+      - name: Install test dependencies
+        run: pip install pytest psycopg2-binary
+
+      - name: Run integration tests
+        run: pytest tests/integration/ -v --tb=short
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_USER: dataeng
+          POSTGRES_PASSWORD: dataeng_pass
+          POSTGRES_DB: analytics_db
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

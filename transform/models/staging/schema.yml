@@ -1,0 +1,24 @@
+version: 2
+
+models:
+  - name: stg_loans
+    description: >
+      Cleaned World Bank IBRD/IDA project loans. One row per project.
+      Status lowercased, country_code uppercased, nulls coalesced to empty string or 0.
+    columns:
+      - name: project_id
+        tests:
+          - not_null
+          - unique
+      - name: status
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["active", "closed", "pipeline"]
+      - name: total_commitment_usd
+        tests:
+          - not_null
+      - name: country_code
+        description: "ISO 2-letter country code, uppercased"
+      - name: board_approval_date
+        description: "Date the World Bank board approved the project"

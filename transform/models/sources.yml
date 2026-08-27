@@ -1,0 +1,20 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    description: "Raw CDC-replicated tables from PostgreSQL via Debezium → Kafka → ClickHouse"
+    tables:
+      - name: loans
+        description: "World Bank IBRD/IDA project loans replicated from OLTP"
+        columns:
+          - name: project_id
+            tests:
+              - not_null
+              - unique
+          - name: status
+            tests:
+              - not_null
+          - name: total_commitment_usd
+            tests:
+              - not_null

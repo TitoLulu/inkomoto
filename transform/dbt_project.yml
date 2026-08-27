@@ -1,0 +1,22 @@
+name: kiva_analytics
+version: '1.0.0'
+config-version: 2
+
+profile: kiva_analytics
+
+model-paths: ["models"]
+test-paths: ["tests"]
+analysis-paths: ["analyses"]
+macro-paths: ["macros"]
+
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  kiva_analytics:
+    staging:
+      +materialized: table
+      +schema: staging
+    mart:
+      +materialized: table
+      +schema: mart

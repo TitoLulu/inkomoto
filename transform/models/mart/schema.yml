@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: mart_loan_performance
+    description: >
+      Project counts and commitment volumes aggregated by region, country,
+      lending instrument, source (IBRD/IDA), and status.
+    columns:
+      - name: region
+        tests:
+          - not_null
+      - name: country_code
+        tests:
+          - not_null
+      - name: project_count
+        tests:
+          - not_null
+      - name: sum_commitment_usd
+        description: "Total committed amount in USD for this group"
+
+  - name: mart_country_portfolio
+    description: >
+      Total World Bank lending portfolio per country — commitment, active
+      vs closed project counts, and approval date range.
+    columns:
+      - name: country_code
+        tests:
+          - not_null
+
+  - name: mart_approval_trends
+    description: >
+      Project approvals and committed amounts by fiscal year, region, and
+      lending instrument. Uses SummingMergeTree for incremental aggregation.
+    columns:
+      - name: approval_year
+        tests:
+          - not_null

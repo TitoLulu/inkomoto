@@ -1,0 +1,25 @@
+.env
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+.DS_Store
+
+# dbt
+transform/target/
+transform/dbt_packages/
+transform/logs/
+
+# Airflow
+airflow/logs/
+airflow/plugins/
+
+# ClickHouse data
+clickhouse/data/
+
+*.docx.pdf

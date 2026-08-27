@@ -1,0 +1,113 @@
+{
+  "title": "WB Loans Pipeline Health",
+  "uid": "wb-pipeline",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Pipeline Last Run Status",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "pipeline_last_run_status{job=\"wb_pipeline\"}",
+          "legendFormat": "Status"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {"options": {"0": {"text": "FAILED", "color": "red"}, "1": {"text": "OK", "color": "green"}}, "type": "value"}
+          ],
+          "thresholds": {
+            "steps": [{"color": "red", "value": 0}, {"color": "green", "value": 1}]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Projects Ingested (last run)",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "targets": [
+        {
+          "expr": "wb_loans_ingested_total{job=\"wb_ingestion\"}",
+          "legendFormat": "Projects"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Ingestion Duration (seconds)",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "wb_ingestion_duration_seconds{job=\"wb_ingestion\"}",
+          "legendFormat": "Duration"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Ingestion Errors",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "targets": [
+        {
+          "expr": "wb_ingestion_errors_total{job=\"wb_ingestion\"}",
+          "legendFormat": "Errors"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [{"color": "green", "value": 0}, {"color": "red", "value": 1}]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "ClickHouse Inserted Rows (rate)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "targets": [
+        {
+          "expr": "rate(ClickHouseProfileEvents_InsertedRows[5m])",
+          "legendFormat": "Rows/s"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "ClickHouse Query Duration (p99)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, rate(ClickHouseProfileEvents_QueryTimeMicroseconds_bucket[5m])) / 1e6",
+          "legendFormat": "p99 latency (s)"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Last Pipeline Run Timestamp",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 8, "x": 0, "y": 12},
+      "targets": [
+        {
+          "expr": "pipeline_last_run_timestamp{job=\"wb_pipeline\"}",
+          "legendFormat": "Last Run"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"unit": "dateTimeAsIso"}
+      }
+    }
+  ]
+}
