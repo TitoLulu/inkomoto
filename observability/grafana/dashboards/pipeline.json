@@ -1,8 +1,8 @@
 {
   "title": "WB Loans Pipeline Health",
-  "uid": "wb-pipeline",
+  "uid": "kiva-pipeline",
   "schemaVersion": 38,
-  "version": 1,
+  "version": 2,
   "refresh": "30s",
   "panels": [
     {
@@ -13,7 +13,8 @@
       "targets": [
         {
           "expr": "pipeline_last_run_status{job=\"wb_pipeline\"}",
-          "legendFormat": "Status"
+          "legendFormat": "Status",
+          "instant": true
         }
       ],
       "fieldConfig": {
@@ -29,13 +30,14 @@
     },
     {
       "id": 2,
-      "title": "Projects Ingested (last run)",
+      "title": "Loans Ingested (last run)",
       "type": "stat",
       "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
       "targets": [
         {
-          "expr": "wb_loans_ingested_total{job=\"wb_ingestion\"}",
-          "legendFormat": "Projects"
+          "expr": "wb_loans_ingested_count{job=\"wb_ingestion\"}",
+          "legendFormat": "Loans",
+          "instant": true
         }
       ]
     },
@@ -47,7 +49,8 @@
       "targets": [
         {
           "expr": "wb_ingestion_duration_seconds{job=\"wb_ingestion\"}",
-          "legendFormat": "Duration"
+          "legendFormat": "Duration",
+          "instant": true
         }
       ]
     },
@@ -59,7 +62,8 @@
       "targets": [
         {
           "expr": "wb_ingestion_errors_total{job=\"wb_ingestion\"}",
-          "legendFormat": "Errors"
+          "legendFormat": "Errors",
+          "instant": true
         }
       ],
       "fieldConfig": {
@@ -84,13 +88,13 @@
     },
     {
       "id": 6,
-      "title": "ClickHouse Query Duration (p99)",
+      "title": "ClickHouse Query Duration (avg)",
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
       "targets": [
         {
-          "expr": "histogram_quantile(0.99, rate(ClickHouseProfileEvents_QueryTimeMicroseconds_bucket[5m])) / 1e6",
-          "legendFormat": "p99 latency (s)"
+          "expr": "rate(ClickHouseProfileEvents_QueryTimeMicroseconds[5m]) / rate(ClickHouseProfileEvents_Query[5m]) / 1e6",
+          "legendFormat": "avg latency (s)"
         }
       ]
     },
@@ -102,7 +106,8 @@
       "targets": [
         {
           "expr": "pipeline_last_run_timestamp{job=\"wb_pipeline\"}",
-          "legendFormat": "Last Run"
+          "legendFormat": "Last Run",
+          "instant": true
         }
       ],
       "fieldConfig": {

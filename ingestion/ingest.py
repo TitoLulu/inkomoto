@@ -131,7 +131,7 @@ def push_metrics(registry: CollectorRegistry) -> None:
 
 def run() -> int:
     registry = CollectorRegistry()
-    loans_gauge   = Gauge("wb_loans_ingested_total",      "Projects ingested in this run", registry=registry)
+    loans_gauge   = Gauge("wb_loans_ingested_count",      "Projects ingested in this run", registry=registry)
     duration_gauge = Gauge("wb_ingestion_duration_seconds", "Ingestion run duration",       registry=registry)
     error_counter  = Counter("wb_ingestion_errors_total",  "Ingestion errors",              registry=registry)
 

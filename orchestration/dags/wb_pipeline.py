@@ -49,17 +49,17 @@ def push_pipeline_status(status: str, **context) -> None:
 
 
 with DAG(
-    dag_id="kiva_pipeline",
-    description="Ingest Kiva loans → CDC to ClickHouse → dbt staging → mart",
+    dag_id="wb_pipeline",
+    description="Ingest World Bank loans → CDC to ClickHouse → dbt staging → mart",
     schedule="@hourly",
     start_date=datetime(2024, 1, 1),
     catchup=False,
     default_args=default_args,
-    tags=["kiva", "ingestion", "cdc", "dbt"],
+    tags=["wb", "ingestion", "cdc", "dbt"],
 ) as dag:
 
     ingest = BashOperator(
-        task_id="ingest_kiva_loans",
+        task_id="ingest_wb_loans",
         bash_command=f"python {INGEST_SCRIPT}",
     )
 
