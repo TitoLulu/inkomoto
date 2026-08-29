@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from airflow import DAG
 from airflow.operators.bash import BashOperator
@@ -21,6 +21,7 @@ DBT_BIN = "/home/airflow/.local/bin/dbt"
 def push_pipeline_status(status: str, **context) -> None:
     """Push a pipeline health metric to the Prometheus Pushgateway."""
     import os
+
     from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 
     pushgateway_url = os.environ.get("PUSHGATEWAY_URL")
@@ -40,11 +41,11 @@ def push_pipeline_status(status: str, **context) -> None:
         "Unix timestamp of last pipeline run",
         registry=registry,
     )
-    ts.set(datetime.utcnow().timestamp())
+    ts.set(datetime.now(tz=timezone.utc).timestamp())
 
     try:
         push_to_gateway(pushgateway_url, job="wb_pipeline", registry=registry)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"Could not push metrics: {exc}")
 
 
@@ -52,7 +53,7 @@ with DAG(
     dag_id="wb_pipeline",
     description="Ingest World Bank loans → CDC to ClickHouse → dbt staging → mart",
     schedule="@hourly",
-    start_date=datetime(2024, 1, 1),
+    start_date=datetime(2024, 1, 1, tzinfo=timezone.utc),
     catchup=False,
     default_args=default_args,
     tags=["wb", "ingestion", "cdc", "dbt"],

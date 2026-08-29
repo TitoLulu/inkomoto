@@ -1,11 +1,12 @@
+import logging
 import os
 import time
-import logging
-import requests
-import psycopg2
-from psycopg2.extras import execute_values
 from datetime import datetime, timezone
-from prometheus_client import CollectorRegistry, Gauge, Counter, push_to_gateway
+
+import psycopg2
+import requests
+from prometheus_client import CollectorRegistry, Counter, Gauge, push_to_gateway
+from psycopg2.extras import execute_values
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -26,13 +27,13 @@ _RETRY_BACKOFF = (1, 3, 9)  # seconds between successive fetch attempts
 def _validate_env() -> None:
     missing = [k for k in _REQUIRED_ENV if not os.environ.get(k)]
     if missing:
-        raise EnvironmentError(f"Missing required environment variables: {missing}")
+        raise OSError(f"Missing required environment variables: {missing}")
 
 
 def get_conn():
     return psycopg2.connect(
         host=os.environ["POSTGRES_HOST"],
-        port=int(os.environ.get("POSTGRES_PORT", 5432)),
+        port=int(os.environ.get("POSTGRES_PORT", "5432")),
         user=os.environ["POSTGRES_USER"],
         password=os.environ["POSTGRES_PASSWORD"],
         dbname=os.environ["POSTGRES_DB"],
@@ -87,7 +88,7 @@ def to_date(val):
         "%Y-%m-%d",
     ):
         try:
-            return datetime.strptime(val, fmt).date()
+            return datetime.strptime(val, fmt).date()  # noqa: DTZ007
         except ValueError:
             continue
     return None
@@ -224,7 +225,7 @@ def run() -> int:
 
     try:
         push_metrics(registry)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         log.warning("Metrics push failed: %s", exc)
 
     log.info("Ingestion complete. projects=%d duration=%.1fs", total, duration)

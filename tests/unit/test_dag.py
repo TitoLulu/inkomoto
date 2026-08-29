@@ -1,7 +1,8 @@
-import sys
 import os
-import pytest
+import sys
 from unittest.mock import patch
+
+import pytest
 
 airflow = pytest.importorskip("airflow", reason="apache-airflow not installed")
 

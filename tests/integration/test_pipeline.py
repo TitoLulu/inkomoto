@@ -3,9 +3,9 @@ Integration tests — run against the live docker compose stack.
 Requires: docker compose up -d postgres clickhouse
 """
 import os
-import pytest
-import psycopg2
 
+import psycopg2
+import pytest
 
 POSTGRES_CONFIG = {
     "host": os.environ.get("POSTGRES_HOST", "localhost"),

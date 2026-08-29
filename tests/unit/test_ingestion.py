@@ -1,18 +1,24 @@
-import sys
 import os
-import pytest
+import sys
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../ingestion"))
 
 from ingest import (
-    parse_project, to_amount, to_date,
-    fetch_projects, upsert_projects, _ingest_all_batches, _validate_env,
-    push_metrics, _build_registry,
     BATCH_SIZE,
+    _build_registry,
+    _ingest_all_batches,
+    _validate_env,
+    fetch_projects,
+    parse_project,
+    push_metrics,
+    to_amount,
+    to_date,
+    upsert_projects,
 )
-
 
 FULL_PROJECT = {
     "id": "P505244",
@@ -127,7 +133,7 @@ class TestValidateEnv:
     def test_raises_when_vars_missing(self, monkeypatch):
         for key in ("POSTGRES_HOST", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"):
             monkeypatch.delenv(key, raising=False)
-        with pytest.raises(EnvironmentError, match="Missing required environment variables"):
+        with pytest.raises(OSError, match="Missing required environment variables"):
             _validate_env()
 
     def test_passes_when_all_vars_present(self, monkeypatch):
@@ -166,9 +172,6 @@ class TestFetchProjects:
 
     def test_retries_on_5xx_then_succeeds(self):
         import requests as req
-        err_resp = MagicMock()
-        err_resp.status_code = 503
-        http_err = req.HTTPError(response=err_resp)
         ok_resp = self._make_response([FULL_PROJECT])
 
         with patch("ingest.requests.get", side_effect=[
@@ -188,17 +191,17 @@ class TestFetchProjects:
         mock_resp.raise_for_status.side_effect = http_err
 
         with patch("ingest.requests.get", return_value=mock_resp), \
-             patch("ingest.time.sleep") as mock_sleep:
-            with pytest.raises(req.HTTPError):
-                fetch_projects(offset=0)
+             patch("ingest.time.sleep") as mock_sleep, \
+             pytest.raises(req.HTTPError):
+            fetch_projects(offset=0)
         mock_sleep.assert_not_called()
 
     def test_raises_after_all_retries_exhausted(self):
         import requests as req
         with patch("ingest.requests.get", side_effect=req.ConnectionError("down")), \
-             patch("ingest.time.sleep"):
-            with pytest.raises(req.ConnectionError):
-                fetch_projects(offset=0)
+             patch("ingest.time.sleep"), \
+             pytest.raises(req.ConnectionError):
+            fetch_projects(offset=0)
 
 
 class TestUpsertProjects:
@@ -284,9 +287,9 @@ class TestIngestAllBatches:
         import requests as req
         conn = MagicMock()
         error_counter = MagicMock()
-        with patch("ingest.fetch_projects", side_effect=req.HTTPError(response=MagicMock(status_code=500))):
-            with pytest.raises(req.HTTPError):
-                _ingest_all_batches(conn, error_counter)
+        with patch("ingest.fetch_projects", side_effect=req.HTTPError(response=MagicMock(status_code=500))), \
+             pytest.raises(req.HTTPError):
+            _ingest_all_batches(conn, error_counter)
         error_counter.inc.assert_called_once()
 
     def test_reraises_db_error_and_increments_counter(self):
@@ -295,9 +298,9 @@ class TestIngestAllBatches:
         error_counter = MagicMock()
         batch = self._make_raw_batch(1)
         with patch("ingest.fetch_projects", return_value=batch), \
-             patch("ingest.upsert_projects", side_effect=psycopg2.DatabaseError("constraint")):
-            with pytest.raises(psycopg2.DatabaseError):
-                _ingest_all_batches(conn, error_counter)
+             patch("ingest.upsert_projects", side_effect=psycopg2.DatabaseError("constraint")), \
+             pytest.raises(psycopg2.DatabaseError):
+            _ingest_all_batches(conn, error_counter)
         error_counter.inc.assert_called_once()
 
     def test_batch_timestamp_is_shared_across_records(self):
