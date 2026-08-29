@@ -1,4 +1,4 @@
-kiva_analytics:
+wb_analytics:
   target: dev
   outputs:
     dev:

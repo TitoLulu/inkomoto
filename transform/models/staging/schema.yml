@@ -14,11 +14,15 @@ models:
         tests:
           - not_null
           - accepted_values:
-              values: ["active", "closed", "pipeline"]
+              values: ["active", "closed", "pipeline", "dropped", "board approved", "board_approved"]
       - name: total_commitment_usd
         tests:
           - not_null
       - name: country_code
         description: "ISO 2-letter country code, uppercased"
+        tests:
+          - not_null
       - name: board_approval_date
         description: "Date the World Bank board approved the project"
+        tests:
+          - not_null

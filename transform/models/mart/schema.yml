@@ -17,6 +17,8 @@ models:
           - not_null
       - name: sum_commitment_usd
         description: "Total committed amount in USD for this group"
+        tests:
+          - not_null
 
   - name: mart_country_portfolio
     description: >
@@ -26,6 +28,18 @@ models:
       - name: country_code
         tests:
           - not_null
+      - name: total_projects
+        tests:
+          - not_null
+      - name: sum_commitment_usd
+        tests:
+          - not_null
+      - name: active_projects
+        tests:
+          - not_null
+      - name: closed_projects
+        tests:
+          - not_null
 
   - name: mart_approval_trends
     description: >
@@ -33,5 +47,35 @@ models:
       lending instrument. Uses SummingMergeTree for incremental aggregation.
     columns:
       - name: approval_year
+        tests:
+          - not_null
+      - name: region
+        tests:
+          - not_null
+      - name: project_count
+        tests:
+          - not_null
+      - name: sum_commitment_usd
+        tests:
+          - not_null
+
+  - name: mart_instrument_summary
+    description: >
+      Lending volumes and project counts aggregated by instrument type and region.
+      Shows active vs closed breakdown and commitment split by IBRD/IDA funding source.
+    columns:
+      - name: lending_instrument
+        tests:
+          - not_null
+      - name: region
+        tests:
+          - not_null
+      - name: project_count
+        tests:
+          - not_null
+      - name: sum_commitment_usd
+        tests:
+          - not_null
+      - name: sum_ibrd_usd
         tests:
           - not_null

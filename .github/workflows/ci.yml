@@ -25,10 +25,15 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install ruff pytest pytest-mock psycopg2-binary requests prometheus-client
+        run: pip install ruff pytest pytest-mock psycopg2-binary requests prometheus-client apache-airflow==2.9.0
 
       - name: Lint (ruff)
         run: ruff check ingestion/ orchestration/dags/ tests/
+
+      - name: Validate DAG imports
+        run: python -c "import sys; sys.path.insert(0, 'orchestration/dags'); import wb_pipeline; print('DAG import OK')"
+        env:
+          AIRFLOW_HOME: /tmp/airflow-ci
 
       - name: Unit tests
         run: pytest tests/unit/ -v --tb=short
@@ -40,6 +45,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Prepare .env for compose validation
+        run: cp .env.example .env
 
       - name: Validate docker-compose syntax
         run: docker compose config --quiet

@@ -10,3 +10,5 @@ RUN pip install --no-cache-dir \
     requests==2.31.0 \
     prometheus-client==0.20.0 \
   && /home/airflow/.local/bin/dbt --version
+
+CMD ["webserver"]

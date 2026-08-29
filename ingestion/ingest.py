@@ -16,10 +16,23 @@ BATCH_SIZE = 500
 MAX_BATCHES = 20
 HEADERS = {"User-Agent": "wb-analytics-pipeline/1.0 (data engineering assessment)"}
 
+# Throttle requests to stay within World Bank API rate limits
+API_RATE_LIMIT_SLEEP_SECONDS = 0.3
+
+_REQUIRED_ENV = ("POSTGRES_HOST", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB")
+_RETRY_BACKOFF = (1, 3, 9)  # seconds between successive fetch attempts
+
+
+def _validate_env() -> None:
+    missing = [k for k in _REQUIRED_ENV if not os.environ.get(k)]
+    if missing:
+        raise EnvironmentError(f"Missing required environment variables: {missing}")
+
 
 def get_conn():
     return psycopg2.connect(
         host=os.environ["POSTGRES_HOST"],
+        port=int(os.environ.get("POSTGRES_PORT", 5432)),
         user=os.environ["POSTGRES_USER"],
         password=os.environ["POSTGRES_PASSWORD"],
         dbname=os.environ["POSTGRES_DB"],
@@ -28,8 +41,25 @@ def get_conn():
 
 def fetch_projects(offset: int = 0) -> list[dict]:
     params = {"format": "json", "rows": BATCH_SIZE, "os": offset}
-    resp = requests.get(WB_PROJECTS_URL, params=params, headers=HEADERS, timeout=30)
-    resp.raise_for_status()
+    last_exc: Exception | None = None
+    resp = None
+    for attempt, wait in enumerate((*_RETRY_BACKOFF, None), start=1):
+        try:
+            resp = requests.get(WB_PROJECTS_URL, params=params, headers=HEADERS, timeout=30)
+            resp.raise_for_status()
+            break
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            last_exc = exc
+        except requests.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code < 500:
+                raise  # don't retry 4xx client errors
+            last_exc = exc
+        if wait is None:
+            raise last_exc  # type: ignore[misc]
+        log.warning("fetch attempt %d failed (offset=%d): %s — retrying in %ds",
+                    attempt, offset, last_exc, wait)
+        time.sleep(wait)
+    assert resp is not None
     if not resp.content or not resp.text.strip():
         return []
     data = resp.json()
@@ -63,7 +93,7 @@ def to_date(val):
     return None
 
 
-def parse_project(raw: dict) -> dict | None:
+def parse_project(raw: dict, ingested_at: datetime | None = None) -> dict | None:
     project_id = raw.get("id")
     if not project_id:
         return None
@@ -89,33 +119,43 @@ def parse_project(raw: dict) -> dict | None:
         "closing_date":          to_date(raw.get("closingdate")),
         "approval_fy":           raw.get("approvalfy"),
         "source":                (sources[0] if isinstance(sources, list) and sources else None),
-        "updated_at":            datetime.now(timezone.utc),
+        "updated_at":            ingested_at or datetime.now(timezone.utc),
     }
+
+
+# Only mutable fields are in DO UPDATE SET; immutable fields (project_name, country,
+# region, approval_fy, etc.) are set on first insert only and never overwritten.
+_UPSERT_COLUMNS = [
+    "project_id", "project_name", "country", "country_code", "region",
+    "status", "lending_instrument", "total_commitment_usd", "ibrd_commitment_usd",
+    "ida_commitment_usd", "total_project_cost_usd", "board_approval_date",
+    "closing_date", "approval_fy", "source", "updated_at",
+]
+
+_UPSERT_SQL = """
+    INSERT INTO loans (
+        project_id, project_name, country, country_code, region,
+        status, lending_instrument, total_commitment_usd, ibrd_commitment_usd,
+        ida_commitment_usd, total_project_cost_usd, board_approval_date,
+        closing_date, approval_fy, source, updated_at
+    )
+    VALUES %s
+    ON CONFLICT (project_id) DO UPDATE SET
+        status                  = EXCLUDED.status,
+        total_commitment_usd    = EXCLUDED.total_commitment_usd,
+        ibrd_commitment_usd     = EXCLUDED.ibrd_commitment_usd,
+        ida_commitment_usd      = EXCLUDED.ida_commitment_usd,
+        closing_date            = EXCLUDED.closing_date,
+        updated_at              = EXCLUDED.updated_at
+"""
 
 
 def upsert_projects(conn, projects: list[dict]) -> int:
     if not projects:
         return 0
-    columns = [
-        "project_id", "project_name", "country", "country_code", "region",
-        "status", "lending_instrument", "total_commitment_usd", "ibrd_commitment_usd",
-        "ida_commitment_usd", "total_project_cost_usd", "board_approval_date",
-        "closing_date", "approval_fy", "source", "updated_at",
-    ]
-    rows = [tuple(p[c] for c in columns) for p in projects]
-    sql = f"""
-        INSERT INTO loans ({', '.join(columns)})
-        VALUES %s
-        ON CONFLICT (project_id) DO UPDATE SET
-            status                  = EXCLUDED.status,
-            total_commitment_usd    = EXCLUDED.total_commitment_usd,
-            ibrd_commitment_usd     = EXCLUDED.ibrd_commitment_usd,
-            ida_commitment_usd      = EXCLUDED.ida_commitment_usd,
-            closing_date            = EXCLUDED.closing_date,
-            updated_at              = EXCLUDED.updated_at
-    """
+    rows = [tuple(p[c] for c in _UPSERT_COLUMNS) for p in projects]
     with conn.cursor() as cur:
-        execute_values(cur, sql, rows)
+        execute_values(cur, _UPSERT_SQL, rows)
     conn.commit()
     return len(rows)
 
@@ -129,16 +169,16 @@ def push_metrics(registry: CollectorRegistry) -> None:
     log.info("Metrics pushed to %s", url)
 
 
-def run() -> int:
+def _build_registry() -> tuple[CollectorRegistry, Gauge, Gauge, Counter]:
     registry = CollectorRegistry()
-    loans_gauge   = Gauge("wb_loans_ingested_count",      "Projects ingested in this run", registry=registry)
-    duration_gauge = Gauge("wb_ingestion_duration_seconds", "Ingestion run duration",       registry=registry)
-    error_counter  = Counter("wb_ingestion_errors_total",  "Ingestion errors",              registry=registry)
+    loans_gauge    = Gauge("wb_loans_ingested_count",       "Projects ingested in this run", registry=registry)
+    duration_gauge = Gauge("wb_ingestion_duration_seconds", "Ingestion run duration",        registry=registry)
+    error_counter  = Counter("wb_ingestion_errors_total",   "Ingestion errors",              registry=registry)
+    return registry, loans_gauge, duration_gauge, error_counter
 
-    start = time.time()
-    conn  = get_conn()
+
+def _ingest_all_batches(conn, error_counter: Counter) -> int:
     total = 0
-
     for batch in range(MAX_BATCHES):
         offset = batch * BATCH_SIZE
         try:
@@ -147,7 +187,8 @@ def run() -> int:
                 log.info("No more records at offset %d — done.", offset)
                 break
 
-            parsed = [p for r in raw_records if (p := parse_project(r)) is not None]
+            batch_ts = datetime.now(timezone.utc)
+            parsed = [p for r in raw_records if (p := parse_project(r, ingested_at=batch_ts)) is not None]
             upsert_projects(conn, parsed)
             total += len(parsed)
             log.info("Batch %d: %d projects (total=%d)", batch + 1, len(parsed), total)
@@ -155,13 +196,28 @@ def run() -> int:
             if len(raw_records) < BATCH_SIZE:
                 break
 
-            time.sleep(0.3)
+            time.sleep(API_RATE_LIMIT_SLEEP_SECONDS)
 
-        except Exception as exc:
-            log.error("Batch %d failed: %s", batch + 1, exc)
+        except requests.HTTPError as exc:
+            log.error("Batch %d HTTP error (offset=%d): %s", batch + 1, offset, exc)
             error_counter.inc()
+            raise
+        except psycopg2.DatabaseError as exc:
+            log.error("Batch %d DB error (offset=%d): %s", batch + 1, offset, exc)
+            error_counter.inc()
+            raise
 
-    conn.close()
+    return total
+
+
+def run() -> int:
+    _validate_env()
+    registry, loans_gauge, duration_gauge, error_counter = _build_registry()
+    start = time.time()
+
+    with get_conn() as conn:
+        total = _ingest_all_batches(conn, error_counter)
+
     duration = time.time() - start
     loans_gauge.set(total)
     duration_gauge.set(duration)
