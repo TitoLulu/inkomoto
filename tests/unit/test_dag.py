@@ -16,7 +16,7 @@ from wb_pipeline import push_pipeline_status
 class TestPushPipelineStatus:
     def test_skips_when_no_url(self, monkeypatch):
         monkeypatch.delenv("PUSHGATEWAY_URL", raising=False)
-        with patch("wb_pipeline.push_to_gateway") as mock_push:
+        with patch("prometheus_client.push_to_gateway") as mock_push:
             push_pipeline_status("failure")
         mock_push.assert_not_called()
 
@@ -29,7 +29,7 @@ class TestPushPipelineStatus:
                 if hasattr(metric, "_value"):
                     captured[metric._name] = metric._value.get()
 
-        with patch("wb_pipeline.push_to_gateway", side_effect=fake_push):
+        with patch("prometheus_client.push_to_gateway", side_effect=fake_push):
             push_pipeline_status("success")
 
         assert captured.get("pipeline_last_run_status") == 1.0
@@ -43,7 +43,7 @@ class TestPushPipelineStatus:
                 if hasattr(metric, "_value"):
                     captured[metric._name] = metric._value.get()
 
-        with patch("wb_pipeline.push_to_gateway", side_effect=fake_push):
+        with patch("prometheus_client.push_to_gateway", side_effect=fake_push):
             push_pipeline_status("failure")
 
         assert captured.get("pipeline_last_run_status") == 0.0
