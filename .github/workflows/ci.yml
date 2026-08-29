@@ -71,13 +71,6 @@ jobs:
           CLICKHOUSE_USER: default
           CLICKHOUSE_PASSWORD: ""
 
-      - name: dbt compile
-        run: cd transform && dbt compile --profiles-dir .
-        env:
-          CLICKHOUSE_HOST: localhost
-          CLICKHOUSE_USER: default
-          CLICKHOUSE_PASSWORD: ""
-
   # ── INTEGRATION TESTS (main branch only) ─────────────────────────────────────
   integration-test:
     name: Integration Tests
