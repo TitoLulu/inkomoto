@@ -2,60 +2,62 @@
 
 ## 1. Architecture Overview
 
+![Pipeline Architecture](wb-pipeline-architecture.jpeg)
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                         INGESTION LAYER                                  │
-│                                                                          │
+│                         INGESTION LAYER                                 |
+│                                                                         |
 │   World Bank Projects API  ──►  Python ingest.py  ──►  PostgreSQL 15    │
 │   (search.worldbank.org)         (batched upsert)      (analytics_db)   │
-│        No auth required          500 rows/batch                          │
+│        No auth required          500 rows/batch                         |
 └──────────────────────────────────┬──────────────────────────────────────┘
                                    │  WAL logical replication
                                    │  (wal_level = logical)
                                    ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                            CDC LAYER                                     │
-│                                                                          │
+│                            CDC LAYER                                    |
+│                                                                         |
 │   Debezium 2.6  ──►  Kafka topic: analytics.public.loans                │
-│   (pgoutput)         ExtractNewRecordState transform                     │
+│   (pgoutput)         ExtractNewRecordState transform                    |
 │                       __op, __ts_ms, __deleted fields added             │
 └──────────────────────────────────┬──────────────────────────────────────┘
                                    │  Kafka engine pull
                                    ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                          OLAP LAYER (ClickHouse)                        │
-│                                                                          │
-│  raw.kafka_loans (Kafka engine)                                          │
-│       │                                                                  │
-│       ▼ (Materialized View: raw.mv_loans)                                │
-│  raw.loans (ReplacingMergeTree)                                          │
-│       │                                                                  │
-│       ▼ (dbt — staging layer)                                            │
-│  staging.stg_loans (ReplacingMergeTree)                                  │
-│       │                                                                  │
-│       ▼ (dbt — mart layer)                                               │
-│  mart.mart_loan_performance   (ReplacingMergeTree)                       │
-│  mart.mart_country_portfolio  (ReplacingMergeTree)                       │
-│  mart.mart_approval_trends    (SummingMergeTree)                         │
+│                                                                         |
+│  raw.kafka_loans (Kafka engine)                                         |
+│       │                                                                 |
+│       ▼ (Materialized View: raw.mv_loans)                               |
+│  raw.loans (ReplacingMergeTree)                                         |
+│       │                                                                 |
+│       ▼ (dbt — staging layer)                                           |
+│  staging.stg_loans (ReplacingMergeTree)                                 |
+│       │                                                                 |
+│       ▼ (dbt — mart layer)                                              |
+│  mart.mart_loan_performance   (ReplacingMergeTree)                      |
+│  mart.mart_country_portfolio  (ReplacingMergeTree)                      |
+│  mart.mart_approval_trends    (SummingMergeTree)                        |
 └─────────────────────────────────────────────────────────────────────────┘
                                    │
 ┌──────────────────────────────────▼──────────────────────────────────────┐
-│                         ORCHESTRATION LAYER                              │
-│                                                                          │
-│   Airflow (hourly DAG: wb_pipeline)                                      │
+│                         ORCHESTRATION LAYER                             |
+│                                                                         |
+│   Airflow (hourly DAG: wb_pipeline)                                     |
 │   ingest → wait 30s → dbt deps → dbt run staging → dbt test staging     │
-│         → dbt run mart → dbt test mart → push Prometheus metric          │
+│         → dbt run mart → dbt test mart → push Prometheus metric         |
 └─────────────────────────────────────────────────────────────────────────┘
                                    │
 ┌──────────────────────────────────▼──────────────────────────────────────┐
-│                        OBSERVABILITY LAYER                               │
-│                                                                          │
-│   Prometheus  ◄──  ClickHouse metrics (port 9363)                        │
-│               ◄──  Pushgateway (pipeline health, ingestion counts)       │
-│                                                                          │
-│   Grafana  ◄──  Prometheus datasource                                    │
-│            Panels: pipeline status, loans ingested, run duration,        │
-│                    errors, ClickHouse insert rate, query duration         │
+│                        OBSERVABILITY LAYER                              |
+│                                                                         |
+│   Prometheus  ◄──  ClickHouse metrics (port 9363)                       |
+│               ◄──  Pushgateway (pipeline health, ingestion counts)      |
+│                                                                         |
+│   Grafana  ◄──  Prometheus datasource                                   |
+│            Panels: pipeline status, loans ingested, run duration,       |
+│                    errors, ClickHouse insert rate, query duration       |
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 

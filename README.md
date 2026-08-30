@@ -162,7 +162,7 @@ docker compose exec postgres psql -U dataeng -d analytics_db \
 
 # Confirm logical replication publication exists
 docker compose exec postgres psql -U dataeng -d analytics_db \
-  -c "SELECT pubname, pubtables FROM pg_publication_tables;"
+  -c "SELECT pubname, schemaname, tablename FROM pg_publication_tables;"
 ```
 
 Expected: `loans` table with thousands of rows; `dbz_publication` listed for `public.loans`.
@@ -178,7 +178,7 @@ docker compose exec kafka kafka-topics \
 docker compose exec kafka kafka-console-consumer \
   --bootstrap-server localhost:9092 \
   --topic analytics.public.loans \
-  --from-beginning --max-messages 5
+  --from-beginning --max-messages 5 --timeout-ms 10000
 
 # Check Debezium connector status
 curl -s http://localhost:8083/connectors/postgres-connector/status | jq
@@ -383,7 +383,7 @@ Covers: API response parsing, type coercion (`to_amount`, `to_date`), upsert SQL
 ### Integration tests (requires running stack)
 
 ```bash
-pip install pytest psycopg2-binary
+pip install pytest psycopg2-binary pytest-env
 pytest tests/integration/ -v \
   --override-ini="env=POSTGRES_HOST=localhost,POSTGRES_USER=dataeng,POSTGRES_PASSWORD=dataeng_pass,POSTGRES_DB=analytics_db"
 ```
@@ -511,7 +511,7 @@ Check that Debezium published CDC events to the Kafka topic:
 docker compose exec kafka kafka-console-consumer \
   --bootstrap-server localhost:9092 \
   --topic analytics.public.loans \
-  --from-beginning --max-messages 3
+  --from-beginning --max-messages 3 --timeout-ms 10000
 ```
 
 If the topic is empty, check the Debezium connector status. If it is populated, check the ClickHouse Kafka engine consumer group offset:
