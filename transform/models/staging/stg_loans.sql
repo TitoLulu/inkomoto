@@ -27,3 +27,4 @@ FROM {{ source('raw', 'loans') }}
 FINAL
 WHERE _deleted = 0
   AND project_id != ''
+  AND status != ''

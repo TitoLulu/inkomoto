@@ -105,7 +105,7 @@
       "gridPos": {"h": 4, "w": 8, "x": 0, "y": 12},
       "targets": [
         {
-          "expr": "pipeline_last_run_timestamp{job=\"wb_pipeline\"}",
+          "expr": "pipeline_last_run_timestamp{job=\"wb_pipeline\"} * 1000",
           "legendFormat": "Last Run",
           "instant": true
         }

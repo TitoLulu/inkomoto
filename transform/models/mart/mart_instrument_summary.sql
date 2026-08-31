@@ -1,6 +1,6 @@
 {{
     config(
-        engine='SummingMergeTree(sum_commitment_usd, sum_ibrd_usd, sum_ida_usd, project_count, active_count, closed_count)',
+        engine='SummingMergeTree',
         order_by='(lending_instrument, region)'
     )
 }}
